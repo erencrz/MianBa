@@ -1,228 +1,248 @@
-import { useState, useCallback, DragEvent, ChangeEvent } from 'react';
-import { resumeApi } from './api/resume';
-import type { ResumeAnalysisResponse } from './types/resume';
-import Interview from './components/Interview';
-import './App.css';
+import {BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams} from 'react-router-dom';
+import Layout from './components/Layout';
+import UploadPage from './pages/UploadPage';
+import HistoryList from './pages/HistoryPage';
+import ResumeDetailPage from './pages/ResumeDetailPage';
+import Interview from './pages/InterviewPage';
+import InterviewHistoryPage from './pages/InterviewHistoryPage';
+import KnowledgeBaseQueryPage from './pages/KnowledgeBaseQueryPage';
+import KnowledgeBaseUploadPage from './pages/KnowledgeBaseUploadPage';
+import KnowledgeBaseManagePage from './pages/KnowledgeBaseManagePage';
+import {historyApi} from './api/history';
+import {useEffect, useState} from 'react';
+import type {UploadKnowledgeBaseResponse} from './api/knowledgebase';
 
-type AppState = 'upload' | 'loading' | 'result' | 'error' | 'interview';
+// 上传页面包装器
+function UploadPageWrapper() {
+  const navigate = useNavigate();
 
-function App() {
-  const [state, setState] = useState<AppState>('upload');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [result, setResult] = useState<ResumeAnalysisResponse | null>(null);
-  const [error, setError] = useState<string>('');
+  const handleUploadComplete = (resumeId: number) => {
+    // 异步模式：上传成功后跳转到简历库，让用户在列表中查看分析状态
+    navigate('/history', { state: { newResumeId: resumeId } });
+  };
 
-  const handleDragOver = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(true);
-  }, []);
+  return <UploadPage onUploadComplete={handleUploadComplete} />;
+}
 
-  const handleDragLeave = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-  }, []);
+// 历史记录列表包装器
+function HistoryListWrapper() {
+  const navigate = useNavigate();
+  
+  const handleSelectResume = (id: number) => {
+    navigate(`/history/${id}`);
+  };
+  
+  return <HistoryList onSelectResume={handleSelectResume} />;
+}
 
-  const handleDrop = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-      setSelectedFile(files[0]);
+// 简历详情包装器
+function ResumeDetailWrapper() {
+  const { resumeId } = useParams<{ resumeId: string }>();
+  const navigate = useNavigate();
+  
+  if (!resumeId) {
+    return <Navigate to="/history" replace />;
+  }
+  
+  const handleBack = () => {
+    navigate('/history');
+  };
+  
+  const handleStartInterview = (resumeText: string, resumeId: number) => {
+    navigate(`/interview/${resumeId}`, { state: { resumeText } });
+  };
+  
+  return (
+    <ResumeDetailPage
+      resumeId={parseInt(resumeId, 10)}
+      onBack={handleBack}
+      onStartInterview={handleStartInterview}
+    />
+  );
+}
+
+// 模拟面试包装器
+function InterviewWrapper() {
+  const { resumeId } = useParams<{ resumeId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [resumeText, setResumeText] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 优先从location state获取resumeText
+    const stateText = (location.state as { resumeText?: string })?.resumeText;
+    if (stateText) {
+      setResumeText(stateText);
+      setLoading(false);
+    } else if (resumeId) {
+      // 如果没有，从API获取简历详情
+      historyApi.getResumeDetail(parseInt(resumeId, 10))
+        .then(resume => {
+          setResumeText(resume.resumeText);
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error('获取简历文本失败', err);
+          setLoading(false);
+        });
+    } else {
+      setLoading(false);
     }
-  }, []);
+  }, [resumeId, location.state]);
 
-  const handleFileChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      setSelectedFile(files[0]);
-    }
-  }, []);
+  if (!resumeId) {
+    return <Navigate to="/history" replace />;
+  }
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  const handleBack = () => {
+    // 尝试返回详情页，如果失败则返回历史列表
+    navigate(`/history/${resumeId}`, { replace: false });
   };
 
-  const handleAnalyze = async () => {
-    if (!selectedFile) return;
-
-    setState('loading');
-    setError('');
-
-    try {
-      const data = await resumeApi.uploadAndAnalyze(selectedFile);
-      setResult(data);
-      setState('result');
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : '分析失败，请重试';
-      setError(errorMessage);
-      setState('error');
-    }
+  const handleInterviewComplete = () => {
+    // 面试完成后跳转到面试记录页
+    navigate('/interviews');
   };
 
-  const handleReset = () => {
-    setSelectedFile(null);
-    setResult(null);
-    setError('');
-    setState('upload');
-  };
-
-  const getPriorityClass = (priority: string): string => {
-    switch (priority) {
-      case '高': return 'priority-high';
-      case '中': return 'priority-medium';
-      case '低': return 'priority-low';
-      default: return '';
-    }
-  };
-
-  const scoreLabels = {
-    contentScore: { name: '内容完整性', max: 25 },
-    structureScore: { name: '结构清晰度', max: 20 },
-    skillMatchScore: { name: '技能匹配度', max: 25 },
-    expressionScore: { name: '表达专业性', max: 15 },
-    projectScore: { name: '项目经验', max: 15 },
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="w-10 h-10 border-3 border-slate-200 border-t-primary-500 rounded-full mx-auto mb-4 animate-spin" />
+          <p className="text-slate-500">加载中...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="app">
-      <div className="header">
-        <h1>🤖 AI智能面试官</h1>
-        <p>上传您的简历，获取专业的AI评分和改进建议</p>
-      </div>
-
-      <div className="card">
-        {state === 'upload' && (
-          <>
-            <div
-              className={`upload-area ${dragOver ? 'dragover' : ''} ${selectedFile ? 'has-file' : ''}`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById('fileInput')?.click()}
-            >
-              <div className="upload-icon">📄</div>
-              <h3>点击或拖拽上传简历</h3>
-              <p>支持 PDF、DOCX、DOC、TXT 格式，最大10MB</p>
-            </div>
-            <input
-              type="file"
-              id="fileInput"
-              accept=".pdf,.doc,.docx,.txt"
-              onChange={handleFileChange}
-              style={{ display: 'none' }}
-            />
-            {selectedFile && (
-              <div className="file-info">
-                📎 {selectedFile.name} ({formatFileSize(selectedFile.size)})
-              </div>
-            )}
-            <div className="btn-wrapper">
-              <button
-                className="btn btn-primary"
-                disabled={!selectedFile}
-                onClick={handleAnalyze}
-              >
-                开始分析
-              </button>
-            </div>
-          </>
-        )}
-
-        {state === 'loading' && (
-          <div className="loading">
-            <div className="spinner"></div>
-            <p>AI正在分析您的简历，请稍候...</p>
-            <p style={{ fontSize: '12px', color: '#999', marginTop: '10px' }}>
-              首次分析可能需要30秒左右
-            </p>
-          </div>
-        )}
-
-        {state === 'error' && (
-          <div className="error-message">
-            <p>{error || '分析过程中出现错误'}</p>
-            <button className="btn btn-primary" style={{ marginTop: '15px' }} onClick={handleReset}>
-              重新上传
-            </button>
-          </div>
-        )}
-      </div>
-
-      {state === 'result' && result && (
-        <div className="card">
-          <div className="score-circle">
-            <span className="score">{result.overallScore}</span>
-          </div>
-          <div className="score-label">综合评分（满分100分）</div>
-
-          <div className="detail-scores">
-            {Object.entries(scoreLabels).map(([key, config]) => (
-              <div className="score-item" key={key}>
-                <div className="label">{config.name}</div>
-                <div className="value">
-                  {result.scoreDetail[key as keyof typeof result.scoreDetail] || 0}/{config.max}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="summary">
-            <div className="section-title">📝 简历总评</div>
-            <p>{result.summary}</p>
-          </div>
-
-          <div className="strengths">
-            <div className="section-title">✨ 亮点优势</div>
-            {result.strengths.map((strength, index) => (
-              <div className="strength-item" key={index}>
-                <span className="strength-icon">✓</span>
-                <span>{strength}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="suggestions">
-            <div className="section-title">💡 改进建议</div>
-            {result.suggestions.map((suggestion, index) => (
-              <div className="suggestion-item" key={index}>
-                <div className="suggestion-header">
-                  <span className="suggestion-category">{suggestion.category}</span>
-                  <span className={`suggestion-priority ${getPriorityClass(suggestion.priority)}`}>
-                    {suggestion.priority}优先级
-                  </span>
-                </div>
-                <div className="suggestion-issue">⚠️ {suggestion.issue}</div>
-                <div className="suggestion-recommendation">💡 {suggestion.recommendation}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="btn-wrapper" style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
-            <button className="btn btn-primary" onClick={handleReset}>
-              分析另一份简历
-            </button>
-            <button 
-              className="btn btn-primary" 
-              style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' }}
-              onClick={() => setState('interview')}
-            >
-              🎙️ 开始模拟面试
-            </button>
-          </div>
-        </div>
-      )}
-
-      {state === 'interview' && result && (
-        <Interview 
-          resumeText={result.originalText} 
-          onBack={handleReset}
-        />
-      )}
-    </div>
+    <Interview
+      resumeText={resumeText}
+      resumeId={parseInt(resumeId, 10)}
+      onBack={handleBack}
+      onInterviewComplete={handleInterviewComplete}
+    />
   );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          {/* 默认重定向到上传页面 */}
+          <Route index element={<Navigate to="/upload" replace />} />
+          
+          {/* 上传页面 */}
+          <Route path="upload" element={<UploadPageWrapper />} />
+          
+          {/* 历史记录列表（简历库） */}
+          <Route path="history" element={<HistoryListWrapper />} />
+          
+          {/* 简历详情 */}
+          <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
+          
+          {/* 面试记录列表 */}
+          <Route path="interviews" element={<InterviewHistoryWrapper />} />
+
+          {/* 模拟面试 */}
+          <Route path="interview/:resumeId" element={<InterviewWrapper />} />
+
+          {/* 知识库管理 */}
+          <Route path="knowledgebase" element={<KnowledgeBaseManagePageWrapper />} />
+
+          {/* 知识库上传 */}
+          <Route path="knowledgebase/upload" element={<KnowledgeBaseUploadPageWrapper />} />
+
+          {/* 问答助手（知识库聊天） */}
+          <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+// 面试记录页面包装器
+function InterviewHistoryWrapper() {
+  const navigate = useNavigate();
+  
+  const handleBack = () => {
+    navigate('/upload');
+  };
+  
+  const handleViewInterview = async (sessionId: string, resumeId?: number) => {
+    if (resumeId) {
+      // 如果有简历ID，跳转到简历详情页的面试详情
+      navigate(`/history/${resumeId}`, { 
+        state: { viewInterview: sessionId } 
+      });
+    } else {
+      // 否则尝试从面试详情中获取简历ID
+      try {
+        await historyApi.getInterviewDetail(sessionId);
+        // 面试详情中没有简历ID，需要从其他地方获取
+        // 暂时跳转到历史记录列表
+        navigate('/history');
+      } catch {
+        navigate('/history');
+      }
+    }
+  };
+  
+  return <InterviewHistoryPage onBack={handleBack} onViewInterview={handleViewInterview} />;
+}
+
+// 知识库管理页面包装器
+function KnowledgeBaseManagePageWrapper() {
+  const navigate = useNavigate();
+
+  const handleUpload = () => {
+    navigate('/knowledgebase/upload');
+  };
+
+  const handleChat = () => {
+    navigate('/knowledgebase/chat');
+  };
+
+  return <KnowledgeBaseManagePage onUpload={handleUpload} onChat={handleChat} />;
+}
+
+// 知识库问答页面包装器
+function KnowledgeBaseQueryPageWrapper() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isChatMode = location.pathname === '/knowledgebase/chat';
+  
+  const handleBack = () => {
+    if (isChatMode) {
+      navigate('/knowledgebase');
+    } else {
+      navigate('/upload');
+    }
+  };
+  
+  const handleUpload = () => {
+    navigate('/knowledgebase/upload');
+  };
+  
+  return <KnowledgeBaseQueryPage onBack={handleBack} onUpload={handleUpload} />;
+}
+
+// 知识库上传页面包装器
+function KnowledgeBaseUploadPageWrapper() {
+  const navigate = useNavigate();
+
+  const handleUploadComplete = (_result: UploadKnowledgeBaseResponse) => {
+    // 上传完成后返回管理页面
+    navigate('/knowledgebase');
+  };
+
+  const handleBack = () => {
+    navigate('/knowledgebase');
+  };
+  
+  return <KnowledgeBaseUploadPage onUploadComplete={handleUploadComplete} onBack={handleBack} />;
 }
 
 export default App;

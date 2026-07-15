@@ -3,3 +3,17 @@
 
 # Ignore Gradle build output directory
 build
+/.claude
+/.idea
+/app/bin
+# Environment variables
+.env
+# IDEA code analysis
+qodana.yaml
+
+app/src/main/resources/application-dev.yml
+/docs
+nginx-1.22.1/
+.vscode/
+app/.idea/
+/.txt

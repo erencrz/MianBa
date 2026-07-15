@@ -32,6 +32,8 @@ export type QuestionType =
 export interface CreateInterviewRequest {
   resumeText: string;
   questionCount: number;
+  resumeId?: number;
+  forceCreate?: boolean;  // 是否强制创建新会话（忽略未完成的会话）
 }
 
 export interface SubmitAnswerRequest {
